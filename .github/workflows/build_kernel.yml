@@ -1,0 +1,101 @@
+name: Build Custom Kernel with Virtualization Support
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Environment & Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential bc bison flex libssl-dev libncurses-dev git \
+            zip unzip ccache clang lld llvm libelf-dev libgettextpo0 \
+            python3 python3-pip curl wget
+
+      - name: Clone Kernel Source & Toolchain
+        run: |
+          # Ganti URL di bawah ini sesuai dengan repository Kernel Source milikmu
+          git clone --depth=1 https://github.com/Mayuri-Chan/android_kernel_xiaomi_earth.git -b main kernel_source
+
+          # Setup Toolchain (Android Clang / AOSP Clang)
+          mkdir -p toolchain
+          cd toolchain
+          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r596125.tar.gz
+          mkdir clang && tar -xf clang-r596125.tar.gz -C clang
+          cd ..
+
+      - name: Apply Virtualization Configurations to Kernel
+        run: |
+          cd kernel_source
+          mkdir -p out
+
+          # Salin file config awal (atau defconfig bawaan device)
+          make O=out ARCH=arm64 vendor/earth_defconfig || make O=out ARCH=arm64 earth_defconfig
+
+          # Mengaktifkan Modul Virtualization & KVM (ARM64)
+          ./scripts/config --file out/.config --enable CONFIG_VIRTUALIZATION
+          ./scripts/config --file out/.config --enable CONFIG_KVM
+          ./scripts/config --file out/.config --enable CONFIG_VIRT_CPU_ACCOUNTING_GEN
+          ./scripts/config --file out/.config --enable CONFIG_PARAVIRT
+          ./scripts/config --file out/.config --enable CONFIG_PARAVIRT_TIME_ACCOUNTING
+
+          # Mengaktifkan Drivers Virtio (Support QEMU / Container I/O)
+          ./scripts/config --file out/.config --enable CONFIG_VIRTIO
+          ./scripts/config --file out/.config --enable CONFIG_VIRTIO_MENU
+          ./scripts/config --file out/.config --enable CONFIG_VIRTIO_PCI
+          ./scripts/config --file out/.config --enable CONFIG_VIRTIO_BALLOON
+          ./scripts/config --file out/.config --enable CONFIG_VIRTIO_INPUT
+          ./scripts/config --file out/.config --enable CONFIG_VIRTIO_MMIO
+          ./scripts/config --file out/.config --enable CONFIG_VIRTIO_NET
+          ./scripts/config --file out/.config --enable CONFIG_VIRTIO_CONSOLE
+          ./scripts/config --file out/.config --enable CONFIG_BLK_MQ_VIRTIO
+
+          # Mengaktifkan Support Container (Docker / LXC / Chroot)
+          ./scripts/config --file out/.config --enable CONFIG_NAMESPACES
+          ./scripts/config --file out/.config --enable CONFIG_USER_NS
+          ./scripts/config --file out/.config --enable CONFIG_CHECKPOINT_RESTORE
+          ./scripts/config --file out/.config --enable CONFIG_CGROUP_DEVICE
+          ./scripts/config --file out/.config --enable CONFIG_CGROUP_PIDS
+          ./scripts/config --file out/.config --enable CONFIG_CGROUP_FREEZER
+          ./scripts/config --file out/.config --enable CONFIG_BINFMT_MISC
+
+          # Mengupdate dan menyelaraskan dependensi .config secara otomatis
+          make O=out ARCH=arm64 olddefconfig
+
+      - name: Compile Kernel
+        run: |
+          cd kernel_source
+          export PATH="$(pwd)/../toolchain/clang/bin:$PATH"
+          
+          make -j$(nproc) O=out \
+            ARCH=arm64 \
+            CC=clang \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
+            Image.gz-dtb
+
+      - name: Package Kernel Image
+        run: |
+          mkdir -p output
+          if [ -f kernel_source/out/arch/arm64/boot/Image.gz-dtb ]; then
+            cp kernel_source/out/arch/arm64/boot/Image.gz-dtb output/Image.gz-dtb
+          elif [ -f kernel_source/out/arch/arm64/boot/Image.gz ]; then
+            cp kernel_source/out/arch/arm64/boot/Image.gz output/Image.gz
+          else
+            cp kernel_source/out/arch/arm64/boot/Image output/Image
+          fi
+
+      - name: Upload Kernel Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Custom-Kernel-Virtualization
+          path: output/*
