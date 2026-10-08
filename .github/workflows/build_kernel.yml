@@ -22,7 +22,7 @@ jobs:
       - name: Clone Kernel Source & Toolchain
         run: |
           # Ganti URL di bawah ini sesuai dengan repository Kernel Source milikmu
-          git clone --depth=1 https://github.com/Mayuri-Chan/android_kernel_xiaomi_earth.git -b main kernel_source
+          git clone --depth=1 https://github.com/mubashardev/android_kernel_xiaomi_earth_lineageos.git -b main kernel_source
 
           # Setup Toolchain (Android Clang / AOSP Clang)
           mkdir -p toolchain
